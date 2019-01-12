@@ -384,6 +384,21 @@ rm(true_ratings,predicted_ratings)
 
 One of the downsides of this approach will be that we will have to round our predicted ratings because we expect the linear model to return non-round predictions.
 
+For now, we will use the method that follows, which rounds to the nearest half-mark:
+
+$$
+Rounded\ Predictions = round(\frac{Predictions}{0.5})*0.5
+$$
+
+Turning this into a function:
+
+```{r}
+rounding_basic <- function(x){
+  round(x/0.5)*0.5
+}
+```
+
+
 Let us simply check what our success metrics would be if we were to predict the average for each observation.
 
 ```{r}
@@ -405,7 +420,7 @@ kable(rmse_results,align=rep("c",3)) %>%
 Of course, we obtain an accuracy of 0 since the average is not a round number. If we try that we get:
 
 ```{r}
-rounded_average_rating <- round(average_rating/2)*2
+rounded_average_rating <- rounding_basic(average_rating)
 
 roundednaiveRMSE <- RMSE(test_set$rating,rounded_average_rating)
 roundednaiveAccuracy <- accuracy(test_set$rating,rounded_average_rating)
@@ -456,8 +471,8 @@ rmse_results <- bind_rows(rmse_results,
                                      RMSE=movie_effect_RMSE,
                                      Accuracy = movie_effect_Accuracy))
 
-rounded_movie_effect_RMSE <- RMSE(round(predicted_ratings/2)*2,test_set$rating)
-rounded_movie_effect_Accuracy <- accuracy(round(predicted_ratings/2)*2,test_set$rating)
+rounded_movie_effect_RMSE <- RMSE(rounding_basic(predicted_ratings),test_set$rating)
+rounded_movie_effect_Accuracy <- accuracy(rounding_basic(predicted_ratings),test_set$rating)
 
 rmse_results <- bind_rows(rmse_results,
                           data_frame(Method= "With Movie Effect (rounded)",
@@ -516,8 +531,8 @@ rmse_results <- bind_rows(rmse_results,
                                      RMSE=movieanduser_effect_RMSE,
                                      Accuracy = movieanduser_effect_Accuracy))
 
-rounded_movieanduser_effect_RMSE <- RMSE(round(predicted_ratings/2)*2, test_set$rating) 
-rounded_movieanduser_effect_Accuracy <- accuracy(round(predicted_ratings/2)*2, test_set$rating) 
+rounded_movieanduser_effect_RMSE <- RMSE(rounding_basic(predicted_ratings), test_set$rating) 
+rounded_movieanduser_effect_Accuracy <- accuracy(rounding_basic(predicted_ratings), test_set$rating) 
 
 rmse_results <- bind_rows(rmse_results,
                           data_frame(Method= "With Movie and User Effect (rounded)",
@@ -646,8 +661,8 @@ rmse_results <- bind_rows(rmse_results,
                                      RMSE=reg_movie_effect_RMSE,
                                      Accuracy = reg_movie_effect_Accuracy))
 
-round_reg_movie_effect_RMSE <- RMSE(round(predicted_ratings/2)*2, test_set$rating) 
-round_reg_movie_effect_Accuracy <- accuracy(round(predicted_ratings/2)*2, test_set$rating) 
+round_reg_movie_effect_RMSE <- RMSE(rounding_basic(predicted_ratings), test_set$rating) 
+round_reg_movie_effect_Accuracy <- accuracy(rounding_basic(predicted_ratings), test_set$rating) 
 
 rmse_results <- bind_rows(rmse_results,
                           data_frame(Method= "With Regularized Movie Effect (rounded)",
@@ -658,5 +673,63 @@ kable(rmse_results,align=rep("c",3), caption = "Metrics calculated on test set o
   kable_styling(full_width = F) %>% 
   column_spec(1,bold=T,border_right = T)
 
+```
+
+We can see that the improvement from regularization, unfortunately, is not great. Still, we will continue with this approach and re-do our analysis on **user_effect** because still provided some improvements.
+
+```{r}
+reg_user_avgs <- train_set %>% 
+  left_join(movie_reg_avgs, by='movieId') %>%
+  group_by(userId) %>%
+  summarize(user_effect = mean(rating - average_rating - reg_movie_effects))
+```
+
+Let's create the non-rounded and rounded predictors and see how it improves our model.
+
+```{r}
+predicted_ratings <- test_set %>% 
+  left_join(movie_reg_avgs, by='movieId') %>%
+  left_join(reg_user_avgs, by='userId') %>%
+  mutate(pred = average_rating + reg_movie_effects + user_effect) %>%
+  .$pred
+
+reg_movieanduser_effect_RMSE <- RMSE(predicted_ratings, test_set$rating) 
+reg_movieanduser_effect_Accuracy <- accuracy(predicted_ratings, test_set$rating) 
+
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(Method= "With Regularized Movie and User Effect",
+                                     RMSE=reg_movieanduser_effect_RMSE,
+                                     Accuracy = reg_movieanduser_effect_Accuracy))
+
+rounded_reg_movieanduser_effect_RMSE <- RMSE(rounding_basic(predicted_ratings), test_set$rating) 
+rounded_reg_movieanduser_effect_Accuracy <- accuracy(rounding_basic(predicted_ratings), test_set$rating) 
+
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(Method= "With Regularized Movie and User Effect (rounded)",
+                                     RMSE=rounded_reg_movieanduser_effect_RMSE,
+                                     Accuracy = rounded_reg_movieanduser_effect_Accuracy))
+
+kable(rmse_results,align=rep("c",3), caption = "Metrics calculated on test set only") %>% 
+  kable_styling(full_width = F) %>% 
+  column_spec(1,bold=T,border_right = T)
+```
+
+So far, the last model, where we use regularized movie effects and add the user-specific effect (while rounding the prediction) is the one giving us the greatest accuracy. Unfortunately we are still only at `r paste(round(100*rmse_results[10,3],2),"%",sep="")`. 
+
+At this point, we believe there might be something wrong with the we we are rounding our predictions. Let's try to optimize that.
+
+### Optimizing rounding method using regularized movie effect and user effect
+
+We will now use the **training set** to find the best way to round our predictions. Namely, we know that there are no 0s and that the results cannot be above 5. We also saw that half-marks are much less common than full marks.
+
+Until now, we have been using the method that follows, which rounds to the nearest half-mark:
+
+$$
+Rounded\ Predictions = round(\frac{Predictions}{0.5})*0.5
+$$
+Turning this into a function:
+
+```{r}
+rounding_basic
 ```
 
