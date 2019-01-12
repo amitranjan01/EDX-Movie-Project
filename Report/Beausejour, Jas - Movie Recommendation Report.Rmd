@@ -1,0 +1,269 @@
+---
+title: "Movie Ratings Project"
+author: "by Jasmyn Beausejour"
+output: 
+  html_notebook: 
+    toc: yes
+---
+
+# Introduction
+
+In this project, we will be using all the tools and methods learned throughout the HarvardX Professional Certificate in Data Science program on edX to build a movie recommendation system.
+
+We will first create the data sets with code that has been provided by the staff at HarvardX. Then, we will do exploratory analysis to get a better understanding of the data. We will then train a machine learning algorithm on the **edx set** to finally help us make recommendations on the **validation set**.
+
+Our output will be 4 different files:
+
+1. A report in PDF format, which we will obtain by publishing this R Notebook in HTML and printing as PDF
+
+2. This report in RMD file
+
+3. A simple R script that generates our recommendations (only the machine learning part of this report without the prose)
+
+4. A *submission.csv* file that will contain the list of movies and our recommendations
+
+# Create edx set, validation set, and submission file
+
+First, we load a few libraries to ensure everything will run smoothly.
+
+```{r}
+library(tidyverse)
+library(caret)
+```
+
+Then, we run the code provided by the staff, which creates an **edx** data frame and a **validation** data frame.
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+# Note: this process could take a couple of minutes
+
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+
+# MovieLens 10M dataset:
+# https://grouplens.org/datasets/movielens/10m/
+# http://files.grouplens.org/datasets/movielens/ml-10m.zip
+
+dl <- tempfile()
+download.file("http://files.grouplens.org/datasets/movielens/ml-10m.zip", dl)
+
+ratings <- read.table(text = gsub("::", "\t", readLines(unzip(dl, "ml-10M100K/ratings.dat"))),
+                      col.names = c("userId", "movieId", "rating", "timestamp"))
+
+movies <- str_split_fixed(readLines(unzip(dl, "ml-10M100K/movies.dat")), "\\::", 3)
+colnames(movies) <- c("movieId", "title", "genres")
+movies <- as.data.frame(movies) %>% mutate(movieId = as.numeric(levels(movieId))[movieId],
+                                           title = as.character(title),
+                                           genres = as.character(genres))
+
+movielens <- left_join(ratings, movies, by = "movieId")
+
+# Validation set will be 10% of MovieLens data
+
+set.seed(1)
+test_index <- createDataPartition(y = movielens$rating, times = 1, p = 0.1, list = FALSE)
+edx <- movielens[-test_index,]
+temp <- movielens[test_index,]
+
+# Make sure userId and movieId in validation set are also in edx set
+
+validation <- temp %>% 
+  semi_join(edx, by = "movieId") %>%
+  semi_join(edx, by = "userId")
+
+# Add rows removed from validation set back into edx set
+
+removed <- anti_join(temp, validation)
+edx <- rbind(edx, removed)
+
+# Learners will develop their algorithms on the edx set
+# For grading, learners will run algorithm on validation set to generate ratings
+
+validation <- validation %>% select(-rating)
+
+# Ratings will go into the CSV submission file below:
+
+write.csv(validation %>% select(userId, movieId) %>% mutate(rating = NA),
+          "submission.csv", na = "", row.names=FALSE)
+rm(dl, ratings, movies, test_index, temp, movielens, removed)
+```
+
+
+# Exploratory data analysis
+
+This section starts with the answers to the quizz online, and then I diverge into my own exploratory analysis.
+
+### Quiz from edX
+
+In our environment, we now have two objects. The **edx set** has `r nrow(edx)` observations by `r length(edx)` variables. The **validation set** has `r nrow(validation)` observations by `r length(validation)` variables. 
+
+Unsurprisingly, the 5 variables included in the **validation set** are also present in the **edx set**, which also has a variable called **rating**, which is the purpose of this paper: predicting the rating for the validation set.
+
+The distribution of ratings given in the **edx set** is as follows.
+
+```{r, results="asis"}
+if(!require(knitr)) install.packages("knitr", repos = "http://cran.us.r-project.org")
+library(knitr)
+
+if(!require(kableExtra)) install.packages("kableExtra", repos = "http://cran.us.r-project.org")
+library(kableExtra)
+
+ratings_freqency <- edx %>% 
+  group_by(rating) %>% 
+  count() %>% 
+  rename("Rating"=rating, "Frequency"=n) %>% 
+  mutate("Of total"=paste(round(100*Frequency/nrow(edx),2),"%",sep=""))
+
+
+kable(ratings_freqency, align = rep("c",3)) %>% 
+  kable_styling(full_width = F) %>% 
+  column_spec(1,bold=T,border_right = T)
+```
+
+The **edx set** is unique on every row, but the number of movies represented is not equal to the number of rows. To count the number of unique movies represented in the set, we use this quick piece of code. Note that we are using the **movieId** variable in case there might be some typos in the **title** variable.
+
+```{r}
+different_movies <- as.data.frame(table(edx$movieId))
+nrow(different_movies)
+```
+
+We can make the same analysis for the number of unique users.
+
+```{r}
+different_users <- as.data.frame(table(edx$userId))
+nrow(different_users)
+```
+
+From a genre perspective, we are asked to find out how many ratings there are for movies that fit the following genres: drama, comedy, thriller, and romance. Of course, a movie might fit different genre.
+
+What we will do here is create a new data frame that will stipulate, for each row, which genre that movie fits. We will then count by genre.
+
+```{r}
+genre_analysis <- edx %>% mutate(Is.Drama = str_detect(genres, "Drama"),
+                                 Is.Comedy = str_detect(genres,"Comedy"),
+                                 Is.Thriller = str_detect(genres, "Thriller"),
+                                 Is.Romance = str_detect(genres, "Romance"))
+
+genre_analysis <- data_frame("Genre"=c("Drama", "Comedy", "Thriller", "Romance"),
+                              "Ratings included"=c(sum(genre_analysis$Is.Drama),
+                                                   sum(genre_analysis$Is.Comedy),
+                                                   sum(genre_analysis$Is.Thriller), 
+                                                   sum(genre_analysis$Is.Romance)))
+kable(genre_analysis, align = rep("c",2)) %>% 
+  kable_styling(full_width = F) %>% 
+  column_spec(1,bold=T,border_right = T)
+```
+
+Now, if we want to see which movie has the greatest number of ratings, we use this piece of code.
+
+```{r}
+movies_by_number_of_rankings <- edx %>% 
+  group_by(title) %>% 
+  count() %>% 
+  ungroup() %>% 
+  arrange(-n) %>% 
+  rename("Movie"=title, "Ratings"=n)
+
+kable(head(movies_by_number_of_rankings), align = rep("c",2)) %>% 
+  kable_styling(full_width = F) %>% 
+  column_spec(1,bold=T,border_right = T)
+```
+
+To see which ratings are given the most often, we can reorder a table we made above.
+
+```{r}
+ratings_freqency <- ratings_freqency %>% arrange(-Frequency)
+
+kable(ratings_freqency, align = rep("c",3)) %>% 
+  kable_styling(full_width = F) %>% 
+  column_spec(1,bold=T,border_right = T)
+```
+
+We can also evaluate how frequent are the "half star ratings".
+
+```{r}
+half_vs_full_ratings <- edx %>% 
+  mutate("Type"=ifelse(rating %in% c(1,2,3,4,5),"Full","Half")) %>% 
+  group_by(Type) %>% 
+  select(Type) %>% 
+  count() %>% 
+  rename("Ratings"=n) %>% 
+  mutate("Of total"=paste(round(100*Ratings/nrow(edx),2),"%",sep=""))
+
+kable(half_vs_full_ratings, align = rep("c",2)) %>% 
+  kable_styling(full_width = F) %>% 
+  column_spec(1,bold=T,border_right = T)
+```
+
+This concludes the analysis required for the quiz online. We will now clean the environment to liberate some memory.
+
+```{r}
+rm(different_movies,different_users,genre_analysis,half_vs_full_ratings,movies_by_number_of_rankings,ratings_freqency)
+```
+
+### Additional exploratory analysis
+
+Drawing from section 71 of **Introduction to Data Science: Data Analysis and Prediction Algorithms with R** by Rafael A. Irizarry, which is available at https://rafalab.github.io/dsbook/, we make a few observations about the data. In fact, most of the code and ideas of this section draw heavily from this book.
+
+First of all, we can see that each user has provided different ratings for different movies. In the table below, we show the ratings given by UserIds 13 through 25 for the5 movies with the most ratings. We can see that not evey user has ranked every movie.
+
+```{r, echo=FALSE}
+keep <- edx %>% 
+  count(movieId) %>% 
+  top_n(5, n) %>% 
+  .$movieId
+
+tab <- edx %>% 
+  filter(movieId%in%keep) %>% 
+  filter(userId %in% c(13:25)) %>% 
+  select(userId, title, rating) %>% 
+  mutate(title = str_remove(title, ", The"),
+         title = str_remove(title, ":.*")) %>%
+  spread(title, rating)
+
+kable(tab) %>% 
+  kable_styling(full_width = F) %>% 
+  column_spec(1,bold=T,border_right = T)
+```
+
+We can get a sense of the sparcity of the data by looking at a matrix for a random sample of 100 movies and 100 users with yellow indicating a user/movie combination for which we have a rating. As we can see here, the data is very sparse.
+
+```{r}
+if(!require(rafalib)) install.packages("rafalib", repos = "http://cran.us.r-project.org")
+library(rafalib)
+
+users <- sample(unique(edx$userId), 100)
+rafalib::mypar()
+edx %>% filter(userId %in% users) %>% 
+  select(userId, movieId, rating) %>%
+  mutate(rating = 1) %>%
+  spread(movieId, rating) %>% select(sample(ncol(.), 100)) %>% 
+  as.matrix() %>% t(.) %>%
+  image(1:100, 1:100,. , xlab="Movies", ylab="Users") %>% 
+  abline(h=0:100+0.5, v=0:100+0.5, col = "lightgrey")
+
+```
+
+Of course, some movies receive a lot more ratings than others. This is not surprising as blockbusters are expected to be rated more frequently than niche movies. We can get a sense of the distribution.
+
+```{r}
+edx %>% 
+  count(movieId) %>%
+  arrange(-n) %>% 
+  ggplot(aes(n)) + 
+  geom_histogram(bins = 30, color = "black") + 
+  labs(title="Movies by rating count", y="Movies", x="Number of ratings")
+```
+
+Of course, the same can be said about users: some are much more active than others.
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+edx %>% 
+  count(userId) %>%
+  arrange(-n) %>% 
+  ggplot(aes(n)) + 
+  geom_histogram(bins = 30, color = "black") + 
+  scale_x_log10()+
+  labs(title="Users by rating count", y="Users", x="Number of ratings")
+```
+
+
