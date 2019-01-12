@@ -122,15 +122,13 @@ kable(ratings_freqency, align = rep("c",3)) %>%
 The **edx set** is unique on every row, but the number of movies represented is not equal to the number of rows. To count the number of unique movies represented in the set, we use this quick piece of code. Note that we are using the **movieId** variable in case there might be some typos in the **title** variable.
 
 ```{r}
-different_movies <- as.data.frame(table(edx$movieId))
-nrow(different_movies)
+length(unique(edx$movieId))
 ```
 
 We can make the same analysis for the number of unique users.
 
 ```{r}
-different_users <- as.data.frame(table(edx$userId))
-nrow(different_users)
+length(unique(edx$userId))
 ```
 
 From a genre perspective, we are asked to find out how many ratings there are for movies that fit the following genres: drama, comedy, thriller, and romance. Of course, a movie might fit different genre.
@@ -194,13 +192,7 @@ kable(half_vs_full_ratings, align = rep("c",2)) %>%
   column_spec(1,bold=T,border_right = T)
 ```
 
-This concludes the analysis required for the quiz online. We will now clean the environment to liberate some memory.
-
-```{r}
-rm(different_movies,different_users,genre_analysis,half_vs_full_ratings,movies_by_number_of_rankings,ratings_freqency)
-```
-
-### Additional exploratory analysis
+### Additional exploratory analysis based on course book
 
 Drawing from section 71 of **Introduction to Data Science: Data Analysis and Prediction Algorithms with R** by Rafael A. Irizarry, which is available at https://rafalab.github.io/dsbook/, we make a few observations about the data. In fact, most of the code and ideas of this section draw heavily from this book.
 
@@ -266,4 +258,56 @@ edx %>%
   labs(title="Users by rating count", y="Users", x="Number of ratings")
 ```
 
+### Additional exploratory analysis based on personal view
 
+Let's first identify whether different users tend to rate movies more harshly than others
+
+```{r}
+Avg_by_user <- edx %>% 
+  group_by(userId) %>% 
+  summarize(avg=mean(rating)) 
+```
+
+On average, users give an average score of `r mean(Avg_by_user$avg)`. That being said, there is indeed a distribution around this mean.
+
+```{r}  
+Avg_by_user %>% ggplot(aes(avg)) +
+  geom_histogram(bins = 30, color = "black")+
+  labs(title="Distribution of average score by users", x="Average score", y="Number of users")
+```
+
+Next, we would like to create a list of all the genres that are represented. Here, we notice that genres are using this style when there are more than 1: **Genre1|Genre2|Genre3**. The list of genres that are represented can be derived as follows.
+
+```{r}
+genres <- unique(c(str_split_fixed(edx$genres,pattern="\\|",n=Inf)))
+genres <- genres[genres !=""&genres !="(no genres listed)"]
+print(genres)
+```
+
+Now, it would be interesting to see the variation in average score by genre. We also highlight the standard deviation in ratings and the frequency of each genre. They are ordered from the highest average score to the lowest average score.
+
+```{r}
+Genres_Stats <- data_frame("Genre"=genres,
+                           "Average Rating"="", 
+                           "Standard Deviation"="",
+                           "Ratings included"="")
+
+for (i in 1:length(genres)) {
+  current_genre=genres[i]
+  Genres_Stats[i,2] <- edx %>% filter(str_detect(genres,current_genre))%>%
+    summarize("Average"=round(mean(rating),2)) %>% .$Average
+  Genres_Stats[i,3] <- edx %>% filter(str_detect(genres,current_genre))%>%
+    summarize("StDev"=round(sd(rating),2)) %>% .$StDev
+  Genres_Stats[i,4] <- edx %>% filter(str_detect(genres,current_genre))%>%
+    count()
+  }
+
+Genres_Stats$`Average Rating` <- as.numeric(Genres_Stats$`Average Rating`)
+
+Genres_Stats %>%
+  arrange(-`Average Rating`) %>% 
+  kable(align=rep("c",4)) %>% 
+  kable_styling(full_width = F) %>% 
+  column_spec(1,bold=T,border_right = T)
+
+```
