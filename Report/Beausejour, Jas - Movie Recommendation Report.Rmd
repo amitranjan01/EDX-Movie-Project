@@ -311,3 +311,352 @@ Genres_Stats %>%
   column_spec(1,bold=T,border_right = T)
 
 ```
+
+# Training machine learning algorithm
+
+### Creating the training and test set
+
+For this portion of the paper, we will randomly select 20% of the **edx set** to serve as our test set.
+
+```{r}
+set.seed(755)
+test_index <- createDataPartition(y = edx$rating, times = 1, p = 0.2, list = FALSE)
+train_set <- edx[-test_index,]
+test_set <- edx[test_index,]
+```
+
+To make sure we don’t include users and movies in the test set that do not appear in the training set, we remove these entries using the semi_join function:
+
+```{r}
+test_set <- test_set %>% 
+  semi_join(train_set, by = "movieId") %>%
+  semi_join(train_set, by = "userId")
+```
+
+
+### Mesure of success
+
+Typically, we would evaluate our algorithm based on the Loss function, or residual mean squared error (RMSE). We define $y_{u,i}$ as the rating for movie $i$ by user $u$ and denote our prediction with $\hat{y}_{i,u}$. The RMSE is then defined as: 
+
+$$
+\mbox{RMSE} = \sqrt{\frac{1}{N} \sum_{u,i}^{} \left( \hat{y}_{u,i} - y_{u,i} \right)^2 }
+$$
+with $N$ being the number of user/movie combinations and the sum occurring over all these combinations.
+
+Let's write a function that computes the **RMSE** for vectors of ratings and their corresponding predictions:
+
+```{r}
+RMSE <- function(true_ratings, predicted_ratings){
+    sqrt(mean((true_ratings - predicted_ratings)^2))
+  }
+```
+
+Basically, for RMSE greater than 1, it means that on average we are off by more than one star. We therefore try to minimize RMSE.
+
+We are also told that we will be evaluated based on accuracy, not RMSE. This means that we are tasked with making categorical predictions as opposed to numerical predictions. The only values we should be predicting are therefore **0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, or 5**.
+
+The final measure of our success will be calculated as follows:
+
+$$
+\mbox{Accuracy}=\frac{Correct\ Predictions}{Total\ Predictions}
+$$
+Let's write a function that computes the **accuracy** for vectors of ratings and their corresponding predictions:
+
+```{r}
+accuracy <- function(true_ratings, predicted_ratings){
+  mean(true_ratings==predicted_ratings)
+}
+```
+
+Let us test the functions:
+
+```{r}
+true_ratings <- c(1,2,4.5,4,5,0.5)
+predicted_ratings <- c(1,2.5,4.5,4,2,1)
+
+RMSE(true_ratings,predicted_ratings)
+accuracy(true_ratings,predicted_ratings)
+
+rm(true_ratings,predicted_ratings)
+```
+
+### Simple linear model based on user bias and movie bias
+
+One of the downsides of this approach will be that we will have to round our predicted ratings because we expect the linear model to return non-round predictions.
+
+Let us simply check what our success metrics would be if we were to predict the average for each observation.
+
+```{r}
+average_rating <- mean(train_set$rating)
+
+naiveRMSE <- RMSE(test_set$rating, average_rating)
+naiveAccuracy <- accuracy(test_set$rating, average_rating)
+```
+
+As we go along, we will be comparing different approaches. Let's start by creating a results table with this naive approach:
+
+```{r}
+rmse_results <- data_frame(Method = "Just the average", RMSE = naiveRMSE, Accuracy =naiveAccuracy)
+
+kable(rmse_results,align=rep("c",3)) %>% 
+  kable_styling(full_width = F) %>% 
+  column_spec(1,bold=T,border_right = T)
+```
+Of course, we obtain an accuracy of 0 since the average is not a round number. If we try that we get:
+
+```{r}
+rounded_average_rating <- round(average_rating/2)*2
+
+roundednaiveRMSE <- RMSE(test_set$rating,rounded_average_rating)
+roundednaiveAccuracy <- accuracy(test_set$rating,rounded_average_rating)
+
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(Method= "Just the average (rounded)",
+                                     RMSE=roundednaiveRMSE,
+                                     Accuracy = roundednaiveAccuracy))
+kable(rmse_results,align=rep("c",3), caption = "Metrics calculated on test set only") %>% 
+  kable_styling(full_width = F) %>% 
+  column_spec(1,bold=T,border_right = T)
+```
+We can see here that we have increased our accuracy to about `r paste(round(100*rmse_results[2,3],2),"%",sep="")`, but our RMSE has increased, which is not surprising.
+
+We can now factor in the fact that certain movies tend to get much better ratings than others. We call this the **movie_effect**.
+
+```{r}
+movie_avgs <- train_set %>% 
+  group_by(movieId) %>% 
+  summarize(movie_effect = mean(rating - average_rating))
+```
+
+We can see that these estimates vary substantially:
+
+```{r}
+movie_avgs %>% qplot(movie_effect, geom ="histogram", bins = 10, data = ., color = I("black"))
+```
+  
+We remember that our average rating is bout 3.5, so a 1.5 movie_effect means a perfect score of 5. 
+  
+We can now try to estimate each observation of the test set using this movie_effect. To be clear, this is the model we are trying, where $$\mu$$ is the average rating, $$b_i$$ is the movie_effect and $$\varepsilon_{u,i}$$ is the error term:
+  
+  $$
+Y_{u,i} = \mu + b_i + \varepsilon_{u,i}
+$$
+
+  
+```{r}
+predicted_ratings <- average_rating + test_set %>% 
+  left_join(movie_avgs, by='movieId') %>%
+  .$movie_effect
+
+movie_effect_RMSE <- RMSE(predicted_ratings, test_set$rating)
+movie_effect_Accuracy <- accuracy(test_set$rating,predicted_ratings)
+
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(Method= "With Movie Effect",
+                                     RMSE=movie_effect_RMSE,
+                                     Accuracy = movie_effect_Accuracy))
+
+rounded_movie_effect_RMSE <- RMSE(round(predicted_ratings/2)*2,test_set$rating)
+rounded_movie_effect_Accuracy <- accuracy(round(predicted_ratings/2)*2,test_set$rating)
+
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(Method= "With Movie Effect (rounded)",
+                                     RMSE=rounded_movie_effect_RMSE,
+                                     Accuracy = rounded_movie_effect_Accuracy))
+
+kable(rmse_results,align=rep("c",3), caption = "Metrics calculated on test set only") %>% 
+  kable_styling(full_width = F) %>% 
+  column_spec(1,bold=T,border_right = T)
+
+```
+  
+As we can see, compared to the rounded average, we have improved our RMSE as well as our Accuracy.
+
+Of course, we know that some users also rate movies differently based on their personal characteristics.
+
+```{r}
+train_set %>% 
+  group_by(userId) %>% 
+  summarize(b_u = mean(rating)) %>% 
+  filter(n()>=100) %>%
+  ggplot(aes(b_u)) + 
+  geom_histogram(bins = 30, color = "black")+
+  labs(title="Count of users by average rating")
+```
+
+Here we can calculate the **user_effect** which is a user-specific effect once the **movie_effect** has been taken into consideration.
+
+We can now try to estimate each observation of the test set using this movie_effect. To be clear, this is the model we are trying, where $$\mu$$ is the average rating, $$b_i$$ is the movie_effect, $$b_u$$ is the user-specific effect and $$\varepsilon_{u,i}$$ is the error term:
+  
+  $$
+Y_{u,i} = \mu + b_i +b_u + \varepsilon_{u,i}
+$$
+
+```{r}
+user_avgs <- train_set %>% 
+  left_join(movie_avgs, by='movieId') %>%
+  group_by(userId) %>%
+  summarize(user_effect = mean(rating - average_rating - movie_effect))
+```
+
+Let's create the non-rounded and rounded predictors and see how it improves our model.
+
+```{r}
+predicted_ratings <- test_set %>% 
+  left_join(movie_avgs, by='movieId') %>%
+  left_join(user_avgs, by='userId') %>%
+  mutate(pred = average_rating + movie_effect + user_effect) %>%
+  .$pred
+
+movieanduser_effect_RMSE <- RMSE(predicted_ratings, test_set$rating) 
+movieanduser_effect_Accuracy <- accuracy(predicted_ratings, test_set$rating) 
+
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(Method= "With Movie and User Effect",
+                                     RMSE=movieanduser_effect_RMSE,
+                                     Accuracy = movieanduser_effect_Accuracy))
+
+rounded_movieanduser_effect_RMSE <- RMSE(round(predicted_ratings/2)*2, test_set$rating) 
+rounded_movieanduser_effect_Accuracy <- accuracy(round(predicted_ratings/2)*2, test_set$rating) 
+
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(Method= "With Movie and User Effect (rounded)",
+                                     RMSE=rounded_movieanduser_effect_RMSE,
+                                     Accuracy = rounded_movieanduser_effect_Accuracy))
+
+kable(rmse_results,align=rep("c",3), caption = "Metrics calculated on test set only") %>% 
+  kable_styling(full_width = F) %>% 
+  column_spec(1,bold=T,border_right = T)
+```
+
+As we can see in this table, however, we only achieved 5% improvement in RMSE with our **movie_effect**, namely from `r naiveRMSE` to `r movie_effect_RMSE`. The next portion of this paper focuses on regularizing out estimates to make sure that movies that are rated very infrequently do not get substantially impacted by the **movie_effect** term in the model.
+
+Let's look at the top 10 worst and best movies based on $\hat{b}_i$. First, let's create a database that connects `movieId` to movie title:
+
+```{r}
+movie_titles <- edx %>% 
+  select(movieId, title) %>%
+  distinct()
+```
+
+Here are the 10 best movies according to our estimate and how often they were rated:
+
+```{r}
+train_set %>% count(movieId) %>% 
+  left_join(movie_avgs, by ="movieId") %>%
+  left_join(movie_titles, by="movieId") %>%
+  arrange(desc(movie_effect)) %>% 
+  select(title, movie_effect,n) %>%
+  rename("Title"=title,"Movie Effect"=movie_effect,"Times Rated"=n) %>% 
+  slice(1:10) %>%  
+  kable() %>% 
+  kable_styling(full_width = F) %>% 
+  column_spec(1,bold=T,border_right = T)
+```
+
+And here are the 10 worst:
+
+```{r}
+train_set %>% count(movieId) %>% 
+  left_join(movie_avgs, by ="movieId") %>%
+  left_join(movie_titles, by="movieId") %>%
+  arrange(movie_effect) %>% 
+  select(title, movie_effect,n) %>%
+  rename("Title"=title,"Movie Effect"=movie_effect,"Times Rated"=n) %>% 
+  slice(1:10) %>%  
+  kable() %>% 
+  kable_styling(full_width = F) %>% 
+  column_spec(1,bold=T,border_right = T)
+```
+
+This is probably not fair. We hare heavily benefiting or penalizing obscure movies when we actually have very little data points for them.
+
+We will now estimate the **regularized_movie_effect** such that:
+
+$$
+Regularized\ Movie\ Effect = \hat{b}_i(\lambda) = \frac{1}{\lambda + n_i} \sum_{u=1}^{n_i} \left(Y_{u,i} - \hat{\mu}\right)
+$$
+
+where $n_i$ is the number of ratings made for movie $i$.
+
+Let's compute these regularized estimates of **regularized_movie_effect** using 
+$\lambda=3$. Later, we will see why we picked 3. 
+
+```{r}
+lambda <- 3
+
+movie_reg_avgs <- train_set %>% 
+  group_by(movieId) %>% 
+  summarize(reg_movie_effects = sum(rating - average_rating)/(n()+lambda), n_i = n()) 
+```
+
+To see how the estimates shrink, let's make a plot of the regularized estimates versus the least squares estimates.
+
+```{r regularization-shrinkage}
+data_frame("Original Movie Effect" = movie_avgs$movie_effect, 
+           "Regularized Movie Effect" = movie_reg_avgs$reg_movie_effects, 
+           n = movie_reg_avgs$n_i) %>%
+    ggplot(aes(`Original Movie Effect`, `Regularized Movie Effect`, size=sqrt(n))) + 
+        geom_point(shape=1, alpha=0.5)
+```
+
+Let's look at the top 10 best movies based on $\hat{b}_i(\lambda)$:
+
+```{r}
+train_set %>% count(movieId) %>% 
+  left_join(movie_reg_avgs, by ="movieId") %>%
+  left_join(movie_titles, by="movieId") %>%
+  arrange(desc(reg_movie_effects)) %>% 
+  select(title, reg_movie_effects,n) %>%
+  rename("Title"=title,"Reg. Movie Effect"=reg_movie_effects,"Times Rated"=n) %>% 
+  slice(1:10) %>%  
+  kable() %>% 
+  kable_styling(full_width = F) %>% 
+  column_spec(1,bold=T,border_right = T)
+```
+
+And now the 10 worst:
+
+```{r}
+train_set %>% count(movieId) %>% 
+  left_join(movie_reg_avgs, by ="movieId") %>%
+  left_join(movie_titles, by="movieId") %>%
+  arrange(reg_movie_effects) %>% 
+  select(title, reg_movie_effects,n) %>%
+  rename("Title"=title,"Reg. Movie Effect"=reg_movie_effects,"Times Rated"=n) %>% 
+  slice(1:10) %>%  
+  kable() %>% 
+  kable_styling(full_width = F) %>% 
+  column_spec(1,bold=T,border_right = T)
+```
+
+Let's see if this improves our results further:
+
+```{r}
+predicted_ratings <- test_set %>% 
+  left_join(movie_reg_avgs, by='movieId') %>%
+  mutate(pred = average_rating + reg_movie_effects) %>%
+  .$pred
+
+reg_movie_effect_RMSE <- RMSE(predicted_ratings, test_set$rating) 
+reg_movie_effect_Accuracy <- accuracy(predicted_ratings, test_set$rating) 
+
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(Method= "With Regularized Movie Effect",
+                                     RMSE=reg_movie_effect_RMSE,
+                                     Accuracy = reg_movie_effect_Accuracy))
+
+round_reg_movie_effect_RMSE <- RMSE(round(predicted_ratings/2)*2, test_set$rating) 
+round_reg_movie_effect_Accuracy <- accuracy(round(predicted_ratings/2)*2, test_set$rating) 
+
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(Method= "With Regularized Movie Effect (rounded)",
+                                     RMSE=round_reg_movie_effect_RMSE,
+                                     Accuracy = round_reg_movie_effect_Accuracy))
+
+kable(rmse_results,align=rep("c",3), caption = "Metrics calculated on test set only") %>% 
+  kable_styling(full_width = F) %>% 
+  column_spec(1,bold=T,border_right = T)
+
+```
+
