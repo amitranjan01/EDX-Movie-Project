@@ -959,4 +959,86 @@ We can see here that we have increased our accuracy quite a bit, to `r paste(rou
 
 So far, we've only used the predictions derived from our linear model to train our algorithm. We've completely left out other information such as genre and timestamp. We will now transform our training set to include these variables. 
 
-For the genre, we know there are a total of `r length(genres)` represented.
+For the genre, we know there are a total of `r length(genres)` represented. We will therefore add `r length(genres)` columns and indicate with a binary variable whether the movie had that genre listed.
+
+We first create a rubric of all movie IDs and whether they associate to each genre.
+
+```{r}
+rm(sub_train_set)
+
+moviegenres <- edx %>% 
+  select(movieId,genres) %>% 
+  distinct()
+
+moviegenres[genres] <- ""
+
+for (i in 1:length(genres)) {
+  moviegenres[,2+i] <- str_detect(moviegenres$genres,genres[i])
+}
+
+moviegenres <- moviegenres[-2]
+
+kable(head(moviegenres[,1:6])) %>% 
+  kable_styling(full_width = F) %>% 
+  column_spec(1,bold=T,border_right = T)
+
+```
+
+We then add this information back into our training and testing sets.
+
+```{r}
+train_set <- train_set %>% 
+  left_join(moviegenres, by="movieId")
+
+test_set <- test_set %>% 
+  left_join(moviegenres, by="movieId")
+
+edx <- edx %>% 
+  left_join(moviegenres, by="movieId")
+
+validation <- validation %>% 
+  left_join(moviegenres, by="movieId")
+
+```
+
+Let us now re-create our sub-training-set.
+
+```{r}
+set.seed(755)
+sub_index <- createDataPartition(y = train_set$rating, times = 1, p = 0.01, list = FALSE)
+sub_train_set <- train_set[sub_index,]
+
+genreslist <- genres
+rm(genres)
+
+sub_train_set <- sub_train_set %>% 
+  select(rating,Predictions,timestamp,one_of(genreslist))
+
+sub_train_set$rating <- as.character(sub_train_set$rating)
+```
+
+#### Trying Various Algorithms to Maximize Accuracy
+
+Here, we will train a vast number of algorithms on the sub_training_set. We will then create a matrix of prediction on the full training set. 
+
+```{r}
+models <- c("glm", "lda",  "naive_bayes",  "svmLinear", 
+                "gamboost",  "gamLoess", "qda", 
+                "knn", "kknn", "loclda", "gam",
+                "rf", "ranger",  "wsrf", "Rborist", 
+                "avNNet", "mlp", "monmlp",
+                "adaboost", "gbm",
+                "svmRadial", "svmRadialCost", "svmRadialSigma")
+```
+
+```{r}
+fits <- lapply(models, function(model){ 
+	print(model)
+	train(rating ~ ., 
+	      method = model, 
+	      data = sub_train_set)
+}) 
+    
+names(fits) <- models
+```
+
