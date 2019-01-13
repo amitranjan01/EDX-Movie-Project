@@ -890,6 +890,10 @@ predicted_ratings_training <- train_set %>%
 train_set <- train_set %>% 
   mutate(Predictions = predicted_ratings_training)
 
+test_set <- test_set %>% 
+  mutate(Predictions = predicted_ratings)
+
+
 ```
 
 In the training set, our RMSE is:
@@ -915,13 +919,44 @@ sub_train_set <- train_set[sub_index,]
 ```
 
 
-Let's now train a decision tree:
+Let's now train a decision tree, while transforming the ratings into categorical data so that the decision tree gives us categorical data as well.
 
 ```{r}
-train_rpart <- train(rating ~ Predictions, 
+train_rpart <- train(as.character(rating) ~ Predictions, 
                      method = "rpart",
                      data = sub_train_set)
 ```
 
 The decision tree looks as follows:
 
+```{r}
+plot(train_rpart$finalModel,margin = 0.1)
+text(train_rpart$finalModel, cex = 0.75)
+```
+
+And our results on the test set would be:
+
+```{r}
+tree_predicted_values <- predict(train_rpart,test_set)
+
+tree_RMSE <- RMSE(as.numeric(as.character(tree_predicted_values)),test_set$rating)
+tree_accuracy <- accuracy(tree_predicted_values,test_set$rating)
+
+accuracy_results <- bind_rows(accuracy_results,
+                          data_frame(Method= "Using Decision Tree with Predicted Values",
+                                     RMSE=tree_RMSE,
+                                     Accuracy = tree_accuracy))
+
+kable(accuracy_results,align=rep("c",3), caption = "Metrics calculated on test set only") %>% 
+  kable_styling(full_width = F) %>% 
+  column_spec(1,bold=T,border_right = T)
+
+```
+
+We can see here that we have increased our accuracy quite a bit, to `r paste(round(100*accuracy_results[3,3],2),"%",sep="")`.
+
+#### Increasing the Number of Predictors
+
+So far, we've only used the predictions derived from our linear model to train our algorithm. We've completely left out other information such as genre and timestamp. We will now transform our training set to include these variables. 
+
+For the genre, we know there are a total of `r length(genres)` represented.
