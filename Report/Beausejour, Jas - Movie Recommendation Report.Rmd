@@ -276,41 +276,6 @@ Avg_by_user %>% ggplot(aes(avg)) +
   labs(title="Distribution of average score by users", x="Average score", y="Number of users")
 ```
 
-Next, we would like to create a list of all the genres that are represented. Here, we notice that genres are using this style when there are more than 1: **Genre1|Genre2|Genre3**. The list of genres that are represented can be derived as follows.
-
-```{r}
-genres <- unique(c(str_split_fixed(edx$genres,pattern="\\|",n=Inf)))
-genres <- genres[genres !=""&genres !="(no genres listed)"]
-print(genres)
-```
-
-Now, it would be interesting to see the variation in average score by genre. We also highlight the standard deviation in ratings and the frequency of each genre. They are ordered from the highest average score to the lowest average score. 
-
-```{r}
-Genres_Stats <- data_frame("Genre"=genres,
-                           "Average Rating"="", 
-                           "Standard Deviation"="",
-                           "Ratings included"="")
-
-for (i in 1:length(genres)) {
-  current_genre=genres[i]
-  Genres_Stats[i,2] <- edx %>% filter(str_detect(genres,current_genre))%>%
-    summarize("Average"=round(mean(rating),2)) %>% .$Average
-  Genres_Stats[i,3] <- edx %>% filter(str_detect(genres,current_genre))%>%
-    summarize("StDev"=round(sd(rating),2)) %>% .$StDev
-  Genres_Stats[i,4] <- edx %>% filter(str_detect(genres,current_genre))%>%
-    count()
-  }
-
-Genres_Stats$`Average Rating` <- as.numeric(Genres_Stats$`Average Rating`)
-
-Genres_Stats %>%
-  arrange(-`Average Rating`) %>% 
-  kable(align=rep("c",4)) %>% 
-  kable_styling(full_width = F) %>% 
-  column_spec(1,bold=T,border_right = T)
-
-```
 
 # Training Machine Learning Algorithm
 
