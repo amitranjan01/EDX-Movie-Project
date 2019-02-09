@@ -914,7 +914,7 @@ Before training machine learning algorithms, we need to take a sample of the tra
 
 ```{r}
 set.seed(755)
-sub_index <- createDataPartition(y = train_set$rating, times = 1, p = 0.1, list = FALSE)
+sub_index <- createDataPartition(y = train_set$rating, times = 1, p = 0.2, list = FALSE)
 sub_train_set <- train_set[sub_index,]
 ```
 
@@ -973,7 +973,7 @@ moviegenres <- edx %>%
 moviegenres[genres] <- ""
 
 for (i in 1:length(genres)) {
-  moviegenres[,2+i] <- str_detect(moviegenres$genres,genres[i])
+  moviegenres[,2+i] <- ifelse(str_detect(moviegenres$genres,genres[i]),1,0)
 }
 
 moviegenres <- moviegenres[-2]
@@ -1022,13 +1022,7 @@ sub_train_set$rating <- as.character(sub_train_set$rating)
 Here, we will train a vast number of algorithms on the sub_training_set. We will then create a matrix of prediction on the full training set. 
 
 ```{r}
-models <- c("glm", "lda",  "naive_bayes",  "svmLinear", 
-                "gamboost",  "gamLoess", "qda", 
-                "knn", "kknn", "loclda", "gam",
-                "rf", "ranger",  "wsrf", "Rborist", 
-                "avNNet", "mlp", "monmlp",
-                "adaboost", "gbm",
-                "svmRadial", "svmRadialCost", "svmRadialSigma")
+models <- c( "lda", "naive_bayes","knn", "kknn", "Rborist")
 ```
 
 ```{r}
